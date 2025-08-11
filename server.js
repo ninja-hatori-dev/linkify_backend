@@ -30,8 +30,8 @@ app.use(cors({
     `chrome-extension://${process.env.EXTENSION_ID}`,
     'https://www.linkedin.com',
     'http://localhost:3000',
-    'http://localhost:3001'
-  ],
+    'http://localhost:3001',
+      'https://linkify-frontend-ashen.vercel.app'  ],
   credentials: true
 }));
 
