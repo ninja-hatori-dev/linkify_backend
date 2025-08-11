@@ -7,3 +7,20 @@ yarn-debug.log*
 yarn-error.log*
 coverage/
 .vercel/
+# Node
+node_modules/
+.nyc_output/
+coverage/
+
+# Env
+.env*
+
+# Builds
+build/
+
+# DB and data
+*.sqlite
+database.sqlite
+
+# Mac
+.DS_Store
