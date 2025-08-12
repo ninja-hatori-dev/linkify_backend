@@ -36,12 +36,19 @@ async function callPerplexityAPI(messages, model = 'sonar-pro') {
 
 // Analyze company to determine key personas to 
 
-
+router.post('/get_company_data', verifyToken, async (req, res) => {
+  try {
+    const { linkedin_url } = req.body;
+  } catch (error) {
+    console.error('Error getting company data:', error);
+    res.status(500).json({ error: 'Failed to get company data' });
+  }
+});
 
 router.post('/comp_analysis', verifyToken, async (req, res) => {
   try {
     console.log('=== STARTING COMPANY PERSONAS ANALYSIS ===');
-    console.log('Request body:', req.body);
+ 
     
     const { linkedin_url, domData , accountDomain } = req.body;
     console.log('Extracted parameters - linkedin_url:', linkedin_url, 'accountDomain:', accountDomain);
@@ -144,7 +151,28 @@ router.post('/comp_analysis', verifyToken, async (req, res) => {
               "growth_stage": "",
               "linkedin_company_url": "",
               "organization_leadership": [],
-              "ideal_customer_personas": [],
+              "ideal_customer_personas": [
+                {
+                  "type": "decision_maker",
+                  "linkedin_keyword_search": "not more than 3 words, and only the words that will definitely be present in the LinkedIn profile"
+                },
+                {
+                  "type": "champion",
+                  "linkedin_keyword_search": "not more than 3 words, and only the words that will definitely be present in the LinkedIn profile"
+                },
+                {
+                  "type": "budget_holder",
+                  "linkedin_keyword_search": "not more than 3 words, and only the words that will definitely be present in the LinkedIn profile"
+                },
+                {
+                  "type": "end_user",
+                  "linkedin_keyword_search": "not more than 3 words, and only the words that will definitely be present in the LinkedIn profile"
+                },
+                {
+                  "type": "influencer",
+                  "linkedin_keyword_search": "not more than 3 words, and only the words that will definitely be present in the LinkedIn profile"
+                }
+              ],
               "use_cases": ""
             }`
           }
@@ -733,19 +761,19 @@ Include any other relevant insights or behavioral signals that could increase ou
     }
 
     // Log the API usage
-    await new Promise((resolve, reject) => {
-      db.db.run(
-        'INSERT INTO analysis_sessions (user_id, session_type, input_data, output_data, api_usage) VALUES (?, ?, ?, ?, ?)',
-        [
-          req.user.userId,
-          'people_analysis',
-          JSON.stringify({ linkedinUrl, accountDomain, data }),
-          JSON.stringify(llmResponse),
-          JSON.stringify({ tokens_used: llmResponse.usage || {} })
-        ],
-        (err) => err ? reject(err) : resolve()
-      );
-    });
+    // await new Promise((resolve, reject) => {
+    //   db.db.run(
+    //     'INSERT INTO analysis_sessions (user_id, session_type, input_data, output_data, api_usage) VALUES (?, ?, ?, ?, ?)',
+    //     [
+    //       req.user.userId,
+    //       'people_analysis',
+    //       JSON.stringify({ linkedinUrl, accountDomain, data }),
+    //       JSON.stringify(llmResponse),
+    //       JSON.stringify({ tokens_used: llmResponse.usage || {} })
+    //     ],
+    //     (err) => err ? reject(err) : resolve()
+    //   );
+    // });
 
     res.json({
       people: peopleAnalysis,

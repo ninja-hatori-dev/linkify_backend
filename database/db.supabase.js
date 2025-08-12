@@ -18,9 +18,10 @@ module.exports = {
       .from('companies')
       .select('*')
       .eq('linkedin_url', linkedin_url)
-      .single();
-    if (error && error.code !== 'PGRST116') throw error;
-    return data || null;
+      .order('updated_at', { ascending: false })
+      .limit(1);
+    if (error) throw error;
+    return (Array.isArray(data) ? data[0] : null) || null;
   },
 
   async updateAccountCompanyAnalysisData(domain, analysisData) {
@@ -28,10 +29,14 @@ module.exports = {
       .from('account_companies')
       .update({ analysis_data: analysisData, updated_at: new Date().toISOString() })
       .eq('domain', domain)
-      .select('*')
-      .single();
+      .select('*');
     if (error) throw error;
-    return data;
+    // If multiple rows were updated due to non-unique domain, return the most recently updated one
+    if (Array.isArray(data)) {
+      const sorted = [...data].sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+      return sorted[0] || null;
+    }
+    return data || null;
   },
 
   async getUserById(id) {
@@ -52,9 +57,10 @@ module.exports = {
       .from('users')
       .select('*')
       .eq('google_id', googleId)
-      .single();
-    if (error && error.code !== 'PGRST116') throw error;
-    return data || null;
+      .order('updated_at', { ascending: false })
+      .limit(1);
+    if (error) throw error;
+    return (Array.isArray(data) ? data[0] : null) || null;
   },
 
   async createAccountCompany(company) {
@@ -72,9 +78,10 @@ module.exports = {
       .from('account_companies')
       .select('*')
       .eq('user_id', user_id)
-      .single();
-    if (error && error.code !== 'PGRST116') throw error;
-    return data || null;
+      .order('updated_at', { ascending: false })
+      .limit(1);
+    if (error) throw error;
+    return (Array.isArray(data) ? data[0] : null) || null;
   },
 
   async getAccountCompanyByDomain(domain) {
@@ -82,9 +89,10 @@ module.exports = {
       .from('account_companies')
       .select('*')
       .eq('domain', domain)
-      .single();
-    if (error && error.code !== 'PGRST116') throw error;
-    return data || null;
+      .order('updated_at', { ascending: false })
+      .limit(1);
+    if (error) throw error;
+    return (Array.isArray(data) ? data[0] : null) || null;
   },
 
   async getAccountCompanyAnalysisDataByDomain(domain) {
@@ -92,9 +100,10 @@ module.exports = {
       .from('account_companies')
       .select('*')
       .eq('domain', domain)
-      .single();
-    if (error && error.code !== 'PGRST116') throw error;
-    return data || null;
+      .order('updated_at', { ascending: false })
+      .limit(1);
+    if (error) throw error;
+    return (Array.isArray(data) ? data[0] : null) || null;
   },
 
   async getAllCompaniesForUser(user_id) {
@@ -113,16 +122,17 @@ module.exports = {
       .select('*')
       .eq('user_id', user_id)
       .eq('domain', domain)
-      .single();
-    if (error && error.code !== 'PGRST116') throw error;
-    return data || null;
+      .order('updated_at', { ascending: false })
+      .limit(1);
+    if (error) throw error;
+    return (Array.isArray(data) ? data[0] : null) || null;
   },
 
   async createCompany(company) {
     // Insert all provided fields to preserve current callers
     const { data, error } = await supabase
       .from('companies')
-      .insert({ ...company, analysis_data: company.analysis_data || {}, rapidapi_data: company.rapidapi_data || {} })
+      .insert({ ...company, analysis_data: company.analysis_data ,linkedin_url: company.linkedin_url,user_id: company.user_id })
       .select('*')
       .single();
     if (error) throw error;
@@ -134,8 +144,12 @@ module.exports = {
       .from('prospects')
       .insert({
         ...prospect,
-        analysis_data: prospect.analysis_data || {},
-        rapidapi_data: prospect.rapidapi_data || {}
+        user_id: prospect.user_id,
+   
+        linkedin_url: prospect.linkedin_url,
+        profile_data: prospect.profile_data ,
+        analysis_data: prospect.analysis_data 
+    
       })
       .select('*')
       .single();

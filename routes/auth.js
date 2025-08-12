@@ -75,7 +75,7 @@ router.get('/verify', verifyToken, (req, res) => {
 // Get current user profile
 router.get('/profile', verifyToken, async (req, res) => {
   try {
-    const db = require('../database/db');
+    const db = require('../database/db.supabase');
     const user = await db.getUserById(req.user.userId);
     
     if (!user) {
