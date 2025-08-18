@@ -13,11 +13,12 @@ module.exports = {
   async createTables() { return; },
   async close() { return; },
 
-  async getCompanyDataByLinkedinUrl(linkedin_url) {
+  async getCompanyDataByLinkedinUrlanddomain(linkedin_url,domain) {
     const { data, error } = await supabase
       .from('companies')
       .select('*')
       .eq('linkedin_url', linkedin_url)
+      .eq('domain', domain)
       .order('updated_at', { ascending: false })
       .limit(1);
     if (error) throw error;
@@ -168,14 +169,36 @@ module.exports = {
     return data || [];
   },
 
-  async getProspectByLinkedInUrl(user_id, linkedin_url) {
+  async getProspectByLinkedInUrlanddomain(linkedin_url,domain) {
     const { data, error } = await supabase
       .from('prospects')
+      .select('*')
+      .eq('domain', domain)
+      .eq('linkedin_url', linkedin_url)
+      .single();
+    if (error && error.code !== 'PGRST116') throw error;
+    return data || null;
+  },
+
+  async getCompanyByLinkedinUrl(user_id, linkedin_url) {
+    const { data, error } = await supabase
+      .from('companies')
       .select('*')
       .eq('user_id', user_id)
       .eq('linkedin_url', linkedin_url)
       .single();
-    if (error && error.code !== 'PGRST116') throw error;
+    if (error) throw error;
+    return data || null;
+  },
+
+  async updateCompany(company) {
+    const { data, error } = await supabase
+      .from('companies')
+      .update(company)
+      .eq('id', company.id)
+      .select('*')
+      .single();
+    if (error) throw error;
     return data || null;
   }
 };

@@ -32,6 +32,161 @@ async function callPerplexityAPI(messages, model = 'sonar-pro') {
   }
 }
 
+// Helper function to safely parse JSON from LLM response
+function parseJSONFromLLMResponse(content) {
+  console.log('Raw LLM response:', content);
+  
+  // Try to extract JSON from the response
+  let jsonString = content;
+  
+  // If the response has markdown code blocks, extract the JSON
+  const codeBlockMatch = content.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+  if (codeBlockMatch) {
+    jsonString = codeBlockMatch[1];
+  } else {
+    // Otherwise, try to find the JSON object
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      jsonString = jsonMatch[0];
+    }
+  }
+  
+  // Clean up common JSON formatting issues
+  jsonString = jsonString
+    .replace(/,\s*}/g, '}')  // Remove trailing commas before closing braces
+    .replace(/,\s*]/g, ']')  // Remove trailing commas before closing brackets
+    .replace(/\/\*[\s\S]*?\*\//g, '') // Remove /* */ comments
+    .replace(/\/\/.*$/gm, '') // Remove // comments
+    .replace(/\n/g, ' ')     // Replace newlines with spaces
+    .replace(/\s+/g, ' ')    // Normalize whitespace
+    .trim();
+
+  // Fix common URL truncation issues
+  jsonString = jsonString.replace(/"https:\s*"/g, '"https://www.linkedin.com/company/unknown"');
+  
+  // Validate JSON structure before parsing
+  let braceCount = 0;
+  let inString = false;
+  let escaped = false;
+  
+  for (let i = 0; i < jsonString.length; i++) {
+    const char = jsonString[i];
+    
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    
+    if (char === '\\') {
+      escaped = true;
+      continue;
+    }
+    
+    if (char === '"' && !escaped) {
+      inString = !inString;
+      continue;
+    }
+    
+    if (!inString) {
+      if (char === '{') braceCount++;
+      if (char === '}') braceCount--;
+    }
+  }
+  
+  // If braces don't match, try to find the largest valid JSON object
+  if (braceCount !== 0) {
+    console.log('JSON braces don\'t match, attempting to fix...');
+    let validEndIndex = -1;
+    braceCount = 0;
+    inString = false;
+    escaped = false;
+    
+    for (let i = 0; i < jsonString.length; i++) {
+      const char = jsonString[i];
+      
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      
+      if (char === '\\') {
+        escaped = true;
+        continue;
+      }
+      
+      if (char === '"' && !escaped) {
+        inString = !inString;
+        continue;
+      }
+      
+      if (!inString) {
+        if (char === '{') braceCount++;
+        if (char === '}') {
+          braceCount--;
+          if (braceCount === 0) {
+            validEndIndex = i;
+            break;
+          }
+        }
+      }
+    }
+    
+    if (validEndIndex > -1) {
+      jsonString = jsonString.substring(0, validEndIndex + 1);
+      console.log('Truncated JSON to valid structure');
+    }
+  }
+  
+  console.log('Cleaned JSON string:', jsonString);
+  
+  try {
+    return JSON.parse(jsonString);
+  } catch (parseError) {
+    console.error('JSON parse error:', parseError);
+    console.error('Problematic JSON string:', jsonString);
+    
+    // Try to fix common JSON issues and parse again
+    let fixedJsonString = jsonString;
+    
+    // Fix incomplete URLs
+    const beforeUrlFix = fixedJsonString;
+    fixedJsonString = fixedJsonString.replace(/"https:\s*"([^"]*?)"/g, '"https://www.linkedin.com/company/unknown"');
+    if (fixedJsonString !== beforeUrlFix) {
+      console.log('Applied URL fix');
+    }
+    
+    // Fix specific case: "url"field_name": (missing comma and quote)
+    const beforeFieldFix = fixedJsonString;
+    fixedJsonString = fixedJsonString.replace(/"([^"]+)"([a-zA-Z_][a-zA-Z0-9_]*)":/g, '"$1", "$2":');
+    if (fixedJsonString !== beforeFieldFix) {
+      console.log('Applied field name quote fix');
+    }
+    
+    // Fix missing comma between string value and next field name
+    const beforeCommaFix = fixedJsonString;
+    fixedJsonString = fixedJsonString.replace(/"([^"]*)"(\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '"$1",$2"$3":');
+    if (fixedJsonString !== beforeCommaFix) {
+      console.log('Applied comma fix');
+    }
+    
+    // Fix missing quotes around field names
+    const beforeQuoteFix = fixedJsonString;
+    fixedJsonString = fixedJsonString.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
+    if (fixedJsonString !== beforeQuoteFix) {
+      console.log('Applied field name quote fix');
+    }
+    
+    console.log('Fixed JSON string:', fixedJsonString);
+    
+    try {
+      return JSON.parse(fixedJsonString);
+    } catch (secondParseError) {
+      console.error('Failed to parse JSON even after fixes:', secondParseError);
+      throw new Error('Unable to parse LLM response as valid JSON');
+    }
+  }
+}
+
 // Analyze user's company to get detailed information
 
 // Analyze company to determine key personas to 
@@ -184,37 +339,8 @@ router.post('/comp_analysis', verifyToken, async (req, res) => {
         
         // Parse the JSON response
         console.log('Step 3.4: Parsing LLM response for account company analysis');
-        let acc_companyInfo = {};
         const content = acc_llmResponse.choices[0].message.content;
-        console.log('Raw LLM response:', content);
-        
-        // Try to extract JSON from the response
-        let jsonString = content;
-        
-        // If the response has markdown code blocks, extract the JSON
-        const codeBlockMatch = content.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
-        if (codeBlockMatch) {
-          jsonString = codeBlockMatch[1];
-        } else {
-          // Otherwise, try to find the JSON object
-          const jsonMatch = content.match(/\{[\s\S]*\}/);
-          if (jsonMatch) {
-            jsonString = jsonMatch[0];
-          }
-        }
-        
-        // Clean up common JSON formatting issues
-        jsonString = jsonString
-          .replace(/,\s*}/g, '}')  // Remove trailing commas before closing braces
-          .replace(/,\s*]/g, ']')  // Remove trailing commas before closing brackets
-          .replace(/\/\*[\s\S]*?\*\//g, '') // Remove /* */ comments
-          .replace(/\/\/.*$/gm, '') // Remove // comments
-          .replace(/\n/g, ' ')     // Replace newlines with spaces
-          .replace(/\s+/g, ' ')    // Normalize whitespace
-          .trim();
-        
-        console.log('Cleaned JSON string:', jsonString);
-        acc_companyInfo = JSON.parse(jsonString);
+        const acc_companyInfo = parseJSONFromLLMResponse(content);
         console.log('Step 3.5: Successfully parsed account company info:', Object.keys(acc_companyInfo));
 
         console.log('Step 3.6: Updating account company analysis data in database');
@@ -512,6 +638,231 @@ if(typeof content === 'string'){
 
 
 
+
+router.post('/comp_analysis_2', verifyToken, async (req, res) => {
+  try {
+    console.log('=== comp_analysis_2 ===');
+ 
+    
+    const { linkedin_url, accountDomain } = req.body;
+    console.log('Extracted parameters - linkedin_url:', linkedin_url, 'accountDomain:', accountDomain);
+
+    if (!linkedin_url) {
+      console.log('ERROR: LinkedIn URL is missing');
+      return res.status(400).json({ error: 'LinkedIn URL is required' });
+    }
+
+    if (!accountDomain) {
+      console.log('ERROR: Account domain is missing');
+      return res.status(400).json({ error: 'Account domain is required' });
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+    //ANALYSIS DATA FOR ACCOUNT COMPANY
+    console.log('Step 2: Fetching account company analysis data for domain:', accountDomain);
+   
+    
+    let analysisData = await db.getAccountCompanyAnalysisDataByDomain(accountDomain);
+    console.log('Account company analysis data result:', analysisData ? 'Found' : 'Not found');
+    
+    if (analysisData) {
+      console.log('Account company analysis data keys:', Object.keys(analysisData.analysis_data || {}));
+    }
+    
+    //check if the analysis data is non empty
+    if (Object.keys(analysisData.analysis_data || {}).length == 0) {
+      
+      console.log('Step 3: Creating account company analysis data - existing data is empty or missing');
+
+        const acc_messages = [
+          {
+            role: 'system',
+            content: `You are an advanced business analyst integrating deep
+             web research, the AURA mental models & ontology, and
+              the Heptapod 7-factor analysis model. Use the domain
+               name provided as the sole input to return an actionable,
+                exhaustively researched briefing for downstream sales
+                 prospecting and strategic targeting.**Apply the following
+                  frameworks:**  - **AURA Ontology:** Analyze using [Actors, 
+                  Use Cases, Resources, Actions, Outcomes, Context]. 
+                   - **AURA Mental Models:** Include first-principles, second-order effects, incentives & friction, 
+                   narrative advantage.  - **Heptapod 7-Factor Analysis:** Structure competitive/disruption analysis by 
+                   Product Coverage & Breadth; Price & Affordability; Performance & Reliability; Integration Ecosystem &
+                    Openness; Scalability & Future-readiness; Customer Support & Services; Brand Equity & Positioning.---#
+                    
+                    ---### OUTPUT FORMAT (use clear headers and lists):#### Company Overview- , 
+                    founding year, headquarters, founders/key executives, company size.#### Product/Service Description- Core products/solutions,
+                     key differentiators, pricing model.#### Target Verticals & Industries- Active verticals, adjacent/emerging markets.#### B
+                     Buyer Personas (with Advanced Role Breakdown)For each persona group, detail:-
+                      **Champion**: Advocate for the product internally. Include typical titles, motivations, pain-points (AURA incentives/friction), 
+                      influence tactics (narrative advantage).- 
+                      **Decision Maker**: Holds final approval. Outline typical decision frameworks, value criteria (first-principles, second-order effects).-
+                       **Budget Holder**: Controls/influences spending. Detail incentive structures, common objections, mitigation tactics (AURA, Heptapod Pricing).- 
+                       **End User/Implementer**: Handles day-to-day use. Describe adoption challenges, friction points, and outcomes.> For each role,
+                        map motivations/dynamics using AURA actors, actions, and outcomes. Explicitly include influence pathways and objections.
+                        #### Competitive Analysis- Identify top direct and indirect competitors.- Use Heptapod 7-factor framework 
+                        for a detailed comparative analysis of each.#### Use Cases & Solutions- Tie use cases explicitly to AURA’s 
+                        Use Cases and Actions categories.- Include novel/emerging use cases per market trends.#### Value Proposition- 
+                        Outline specific business outcomes, ROI, cost savings, compliance or productivity gains—mapped to AURA outcomes. I
+                        nclude real-world data/testimonials where available.#### Recent News & Developments- Latest funding, partnerships, 
+                        product launches (focus on last 12-24 months).#### AURA & Heptapod Insights Summary- Synthesize how AURA & Heptapod models 
+                        shape company approach, customer engagement, and differentiation.- Highlight second-order effects, narrative strategies, 
+                        and untapped opportunities.##### Output guidelines:- Use clear headers/bullets for readability.- Reference AURA and Heptapod
+                         concepts contextually throughout.- Be exhaustive yet concise, sales-ready, and actionable.- Base all claims on up-to-date r
+                         esearch, real data, or explicit logical inference `  
+            },
+          {
+            role: 'user',
+            content: `Analyze the company with domain "${accountDomain}". Provide information in this exact JSON structure:
+            {
+              "company_name": "",
+              "industry": "",
+              "size": "",
+              "location": "",
+              "description": "",
+              "products_services": [],
+              "target_markets": [],
+              "competitors": [],
+              "technology_stack": [],
+              "growth_stage": "",
+      
+              "organization_leadership": [],
+              "ideal_customer_personas": [
+                {
+                  "type": "decision_maker",
+                  "linkedin_keyword_search": "not more than 3 words, and only the words that will definitely be present in the LinkedIn profile"
+                },
+                {
+                  "type": "champion",
+                  "linkedin_keyword_search": "not more than 3 words, and only the words that will definitely be present in the LinkedIn profile"
+                },
+                {
+                  "type": "budget_holder",
+                  "linkedin_keyword_search": "not more than 3 words, and only the words that will definitely be present in the LinkedIn profile"
+                },
+                {
+                  "type": "end_user",
+                  "linkedin_keyword_search": "not more than 3 words, and only the words that will definitely be present in the LinkedIn profile"
+                },
+                {
+                  "type": "influencer",
+                  "linkedin_keyword_search": "not more than 3 words, and only the words that will definitely be present in the LinkedIn profile"
+                }
+              ],
+              "use_cases": ""
+            }`
+          }
+        ];
+    
+        console.log('Step 3.2: Calling Perplexity API for account company analysis');
+        const acc_llmResponse = await callPerplexityAPI(acc_messages);
+        console.log('Step 3.3: Received LLM response for account company analysis');
+        
+        // Parse the JSON response
+        console.log('Step 3.4: Parsing LLM response for account company analysis');
+        const content = acc_llmResponse.choices[0].message.content;
+        const acc_companyInfo = parseJSONFromLLMResponse(content);
+        console.log('Step 3.5: Successfully parsed account company info:', Object.keys(acc_companyInfo));
+
+        console.log('Step 3.6: Updating account company analysis data in database');
+        const updatedAccountCompany = await db.updateAccountCompanyAnalysisData(accountDomain, acc_companyInfo); 
+        console.log('Updated account company:', updatedAccountCompany);
+        analysisData = updatedAccountCompany;
+        console.log('Step 3.7: Account company analysis data updated successfully');
+
+       
+
+
+          
+      } 
+       
+      
+        //if have rapidapi data in companies table then return the company data
+        const companyData = await db.getCompanyDataByLinkedinUrlanddomain(linkedin_url.split('?')[0],accountDomain);
+if ( ! companyData){
+  //create a new company
+  const newCompany = await db.createCompany({
+    user_id: req.user.userId,
+    linkedin_url: linkedin_url.split('?')[0],
+    domain: accountDomain,
+    account_company_id : analysisData.id
+ 
+  })
+  console.log('newCompany', newCompany);
+  
+  
+  return res.json({message: 'START_SEARCHING_FOR_PERSONAS',
+    account_company_data: analysisData,
+    linkedin_url: linkedin_url.split('?')[0]
+  })
+}
+        if (companyData && companyData.persona ) {
+          console.log('Step 3.8: Returning company data from database');
+          console.log('companyData', companyData);
+        
+          return res.json({
+            company: {
+              linkedin_url: linkedin_url.split('?')[0],
+              analysis_data: JSON.parse(companyData.analysis_data),
+              account_company_data: analysisData,
+              persona: companyData.persona
+            },
+            fromCache: true
+          });
+        }else{
+          
+
+            return res.json({message: 'START_SEARCHING_FOR_PERSONAS',
+            account_company_data: analysisData,
+            linkedin_url: linkedin_url
+          })
+        } 
+        
+    
+
+
+      
+
+  
+  }  catch (error) {
+    console.error('Persona analysis error:', error);
+    res.status(500).json({ error: 'Failed to analyze personas' });
+  }
+});
+
+
+
+router.post('/get_people_analysis_data', verifyToken, async (req, res) => {
+  try {
+    const { linkedinUrl, accountDomain } = req.body;
+    const data = await db.getProspectByLinkedInUrlanddomain(linkedinUrl,accountDomain);
+    if(data && data.analysis_data && Object.keys(data.analysis_data).length > 0){
+      return res.json({
+        data: data.analysis_data
+      });
+    }else{
+      return res.json({
+      message: 'Get_PEOPLE_DOM_DATA'
+      });
+    }
+  } catch (error) {
+    console.error('People analysis error:', error);
+    res.status(500).json({ error: 'Failed to analyze people' });
+  }
+});
+
+
+
 router.post('/people_analysis', verifyToken, async (req, res) => {
   try {
     const { linkedinUrl, accountDomain, data } = req.body;
@@ -532,7 +883,7 @@ router.post('/people_analysis', verifyToken, async (req, res) => {
       console.log('Checking for existing people analysis for LinkedIn URL:', linkedinUrl);
       
       // Get prospect by LinkedIn URL
-      const existingProspect = await db.getProspectByLinkedInUrl(req.user.userId, linkedinUrl);
+      const existingProspect = await db.getProspectByLinkedInUrlanddomain(linkedinUrl,accountDomain);
       if (existingProspect) {
         console.log('Prospect found in database:', existingProspect);
         
@@ -551,6 +902,16 @@ router.post('/people_analysis', verifyToken, async (req, res) => {
       }
     
       let seller_company_data = await db.getAccountCompanyAnalysisDataByDomain(accountDomain);
+
+
+
+
+
+
+
+
+
+
     console.log('Account company analysis data result:', seller_company_data ? 'Found' : 'Not found');
 
     const messages = [
@@ -602,14 +963,14 @@ Include any other relevant insights or behavioral signals that could increase ou
             "title": "",
             "company": "",
             "location": "",
-            "experience_years": 0,
+            "experience_years": ,
             "education": "",
             "skills": []
           },
           "PersonalityTraits": {
-            "communication_style": "",
-            "decision_making_style": "",
-            "key_motivators": [],
+            "communication_style": [],
+            "decision_making_style": [],
+        
             "potential_objections": []
           },
           "ICP_FitScore": {
@@ -726,8 +1087,8 @@ Include any other relevant insights or behavioral signals that could increase ou
       console.log('Saving people analysis data for LinkedIn URL:', linkedinUrl);
       
       // Check if prospect already exists
-      const existingProspect = await db.getProspectByLinkedInUrl(req.user.userId, linkedinUrl);
-      
+      const existingProspect = await db.getProspectByLinkedInUrlanddomain(linkedinUrl,accountDomain);
+
       if (existingProspect) {
         // Update existing prospect
         console.log('Updating existing prospect with analysis data for prospect ID:', existingProspect.id);
@@ -753,7 +1114,8 @@ Include any other relevant insights or behavioral signals that could increase ou
           user_id: req.user.userId,
           linkedin_url: linkedinUrl,
           analysis_data: peopleAnalysis,
-          profile_data: data
+          profile_data: data,
+          domain: accountDomain
         });
       }
     } else {
@@ -776,7 +1138,7 @@ Include any other relevant insights or behavioral signals that could increase ou
     // });
 
     res.json({
-      people: peopleAnalysis,
+      data: peopleAnalysis,
       fromCache: false
     });
   } catch (error) {

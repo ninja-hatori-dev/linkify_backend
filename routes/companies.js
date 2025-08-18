@@ -1,6 +1,6 @@
 const express = require('express');
 const { verifyToken } = require('./auth');
-const db = require('../database/db');
+const db = require('../database/db.supabase');
 
 const router = express.Router();
 
@@ -42,6 +42,59 @@ router.get('/account', verifyToken, async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch account company' });
   }
 });
+
+
+// Update company personas with people search results
+router.post('/update_personas', verifyToken, async (req, res) => {
+  try {
+    console.log("updating presona route")
+    const { company_linkedin_url, people_data ,domain} = req.body;
+    
+    if (!company_linkedin_url || !people_data) {
+      return res.status(400).json({ error: 'Company LinkedIn URL and people data are required' });
+    }
+    
+    console.log('Updating personas for company:', company_linkedin_url);
+    console.log('People data received:', people_data);
+    
+    // Find company by LinkedIn URL
+    const company = await db.getCompanyDataByLinkedinUrlanddomain(company_linkedin_url.split('?')[0],domain);
+    console.log('company', company);
+    if (!company) {
+      return res.status(404).json({ error: 'Company not found' });
+    }
+
+
+    const updatedCompany = await db.updateCompany({
+      id: company.id,
+      persona: people_data
+    });
+
+    console.log('updatedCompany', updatedCompany);
+
+    //Get the account company data
+    const accountCompany = await db.getAccountCompanyByDomain(domain);
+    console.log('accountCompany', accountCompany);
+    
+    // res.json({ 
+    //   message: 'Personas updated successfully',
+    //   company_name: updatedCompany.company_name,
+    //   personas: updatedCompany.personas,
+    //   company_linkedin_url: updatedCompany.linkedin_url
+    // });
+    return res.json({company: {
+      linkedin_url: company_linkedin_url.split('?')[0],
+      analysis_data: accountCompany.analysis_data,  
+      account_company_data: accountCompany,
+      persona: updatedCompany.persona
+    }})
+        
+  } catch (error) {
+    console.error('Update personas error:', error);
+    res.status(500).json({ error: 'Failed to update personas' });
+  }
+});
+
 
 // Get prospect companies only (for prospecting) - now same as root endpoint
 router.get('/prospects', verifyToken, async (req, res) => {
